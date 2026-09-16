@@ -47,7 +47,8 @@
 // ----------------------------------------------------------------------
 FlitChannel::FlitChannel(Module * parent, string const & name, int classes)
 : Channel<Flit>(parent, name), _routerSource(NULL), _routerSourcePort(-1), 
-  _routerSink(NULL), _routerSinkPort(-1), _idle(0) {
+  _routerSink(NULL), _routerSinkPort(-1), _cycles_per_flit(1), _next_free_time(0),
+  _idle(0) {
   _active.resize(classes, 0);
 }
 
@@ -63,6 +64,11 @@ void FlitChannel::SetSink(Router const * const router, int port) {
 
 void FlitChannel::Send(Flit * f) {
   if(f) {
+    // The caller is responsible for honouring IsReady(). Sending into a busy
+    // channel would silently overwrite the flit already in the input slot, so
+    // trap it here rather than lose traffic.
+    assert(IsReady());
+    _next_free_time = GetSimTime() + _cycles_per_flit;
     ++_active[f->cl];
   } else {
     ++_idle;

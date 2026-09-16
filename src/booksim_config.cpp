@@ -108,6 +108,23 @@ BookSimConfig::BookSimConfig( )
   _int_map["buf_size"]        = -1; //shared buffer size
   AddStrField("buffer_policy", "private"); //buffer sharing policy
 
+  // Unit system for topologies that express link bandwidth physically (see
+  // PCINet). One flit carries flit_bytes bytes and one cycle is ns_per_cycle
+  // nanoseconds; together they turn a PCIe generation and lane width into an
+  // integer cycles-per-flit. Defaults make Gen5 x16 exactly 1 flit/cycle.
+  // ns_per_cycle is metadata for result reporting: BookSim itself counts cycles.
+  _int_map["flit_bytes"] = 64;
+  // PCIe Max Payload Size, and the per-TLP overhead charged alongside it
+  // (header + sequence number + LCRC + STP/END framing). Charging overhead as
+  // real flits rather than as a flat rate derate is what makes small transfers
+  // correctly more expensive per byte than large ones.
+  _int_map["pcie_mps"] = 256;
+  _int_map["pcie_tlp_overhead_bytes"] = 24;
+  // Depth of the per-source injection queue, in packets. Bounds memory so a
+  // multi-gigabyte flow is packetized on demand instead of all at once.
+  _int_map["max_queued_packets"] = 8;
+  _float_map["ns_per_cycle"] = 1.0;
+
   _int_map["private_bufs"] = -1;
   _int_map["private_buf_size"] = 1;
   AddStrField("private_buf_size", "");

@@ -45,6 +45,8 @@
 
 #include "channel.hpp"
 #include "flit.hpp"
+#include "globals.hpp"
+#include <cassert>
 
 using namespace std;
 
@@ -72,6 +74,26 @@ public:
     return _active;
   }
 
+  // Link bandwidth, expressed as the number of cycles one flit occupies the
+  // wire. 1 (the default) reproduces stock BookSim exactly: a channel that
+  // accepts a flit every cycle. Larger values model a narrower or slower link
+  // (e.g. PCIe Gen5 x8 is half of Gen5 x16, so cycles_per_flit == 2 when a
+  // Gen5 x16 link is defined as 1 flit/cycle).
+  inline void SetCyclesPerFlit(int cpf) {
+    assert(cpf >= 1);
+    _cycles_per_flit = cpf;
+  }
+  inline int GetCyclesPerFlit() const {
+    return _cycles_per_flit;
+  }
+
+  // False while the wire is still serializing the previous flit. Callers must
+  // check this BEFORE dequeuing, because Channel<Flit>::Send() overwrites its
+  // single input slot unconditionally and would drop the flit on the floor.
+  inline bool IsReady() const {
+    return GetSimTime() >= _next_free_time;
+  }
+
   // Send flit 
   virtual void Send(Flit * flit);
 
@@ -90,6 +112,11 @@ private:
   int _routerSourcePort;
   Router const * _routerSink;
   int _routerSinkPort;
+
+  // Link bandwidth: cycles occupied per flit, and the cycle at which the wire
+  // next becomes free.
+  int _cycles_per_flit;
+  int _next_free_time;
 
   // Statistics for Activity Factors
   vector<int> _active;

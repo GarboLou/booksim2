@@ -46,6 +46,7 @@
 #include "tree4.hpp"
 #include "fattree.hpp"
 #include "anynet.hpp"
+#include "pcinet.hpp"
 #include "dragonfly.hpp"
 
 
@@ -108,6 +109,9 @@ Network * Network::New(const Configuration & config, const string & name)
   } else if ( topo == "anynet"){
     AnyNet::RegisterRoutingFunctions() ;
     n = new AnyNet(config, name);
+  } else if ( topo == "pcinet"){
+    PCINet::RegisterRoutingFunctions() ;
+    n = new PCINet(config, name);
   } else if ( topo == "dragonflynew"){
     DragonFlyNew::RegisterRoutingFunctions() ;
     n = new DragonFlyNew(config, name);

@@ -2239,7 +2239,11 @@ void IQRouter::_OutputQueuing( )
 void IQRouter::_SendFlits( )
 {
   for ( int output = 0; output < _outputs; ++output ) {
-    if ( !_output_buffer[output].empty( ) ) {
+    // IsReady() is false while a narrower/slower link is still serializing the
+    // previous flit; leaving the flit queued lets output_buffer_size propagate
+    // the resulting pressure back through switch and VC allocation.
+    if ( !_output_buffer[output].empty( ) &&
+	 _output_channels[output]->IsReady( ) ) {
       Flit * const f = _output_buffer[output].front( );
       assert(f);
       _output_buffer[output].pop( );
