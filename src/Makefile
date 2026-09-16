@@ -27,16 +27,30 @@
 LEX = flex
 YACC   = bison -y
 DEFINE = 
-INCPATH = -I. -Iarbiters -Iallocators -Irouters -Inetworks -Ipower
+INCPATH = -I. -Iarbiters -Iallocators -Irouters -Inetworks -Ipower -Iengine
 CPPFLAGS += -Wall $(INCPATH) $(DEFINE)
 CPPFLAGS += -O3
 CPPFLAGS += -g
+# -fPIC so the archive can be linked into a shared object or a PIE executable
+# (the SimAI frontend links libbooksim.a into its own binary).
+CPPFLAGS += -fPIC
+# Applied to C++ translation units only: the generated lex/yacc sources below
+# are compiled with $(CC) and would reject a C++ standard flag.
+CXXSTD ?= -std=c++17
 LFLAGS +=
 
 PROG := booksim
+LIB  := libbooksim.a
+
+# Standalone tools: each tools/*.cpp defines its own main() and links against
+# the library, so they must be kept out of both CPP_SRCS and LIB_OBJS.
+TOOL_SRCS = $(wildcard tools/*.cpp)
+TOOL_OBJS = $(TOOL_SRCS:.cpp=.o)
+TOOL_DEPS = $(TOOL_SRCS:.cpp=.d)
+TOOLS     = $(TOOL_SRCS:.cpp=)
 
 # simulator source files
-CPP_SRCS = $(wildcard *.cpp) $(wildcard */*.cpp)
+CPP_SRCS = $(filter-out $(TOOL_SRCS),$(wildcard *.cpp) $(wildcard */*.cpp))
 CPP_HDRS = $(wildcard *.hpp) $(wildcard */*.hpp)
 CPP_DEPS = $(CPP_SRCS:.cpp=.d)
 CPP_OBJS = $(CPP_SRCS:.cpp=.o)
@@ -50,12 +64,23 @@ YACC_OBJS = y.tab.o
 
 OBJS :=  $(CPP_OBJS) $(LEX_OBJS) $(YACC_OBJS)
 
-.PHONY: clean
+# Everything except main(), so the simulator can be embedded in another program.
+# The globals main.cpp used to define now live in booksim_globals.cpp.
+LIB_OBJS := $(filter-out main.o,$(CPP_OBJS)) $(LEX_OBJS) $(YACC_OBJS)
 
-all: $(PROG)
+.PHONY: clean all
+
+all: $(PROG) $(LIB) $(TOOLS)
 
 $(PROG): $(OBJS)
 	 $(CXX) $(LFLAGS) $^ -o $@
+
+$(LIB): $(LIB_OBJS)
+	$(AR) rcs $@ $^
+
+# Link order matters: the archive must follow the object that references it.
+tools/%: tools/%.o $(LIB)
+	$(CXX) $(LFLAGS) $< $(LIB) -o $@
 
 $(LEX_SRCS): config.l
 	$(LEX) $<
@@ -70,14 +95,16 @@ $(YACC_OBJS): $(YACC_SRCS)
 	$(CC) $(CPPFLAGS) -c $< -o $@
 
 %.o: %.cpp
-	$(CXX) $(CPPFLAGS) -MMD -c $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXSTD) -MMD -c $< -o $@
 
 clean:
 	rm -f $(YACC_SRCS) $(YACC_HDRS)
 	rm -f $(LEX_SRCS)
-	rm -f $(CPP_DEPS)
-	rm -f $(OBJS)
+	rm -f $(CPP_DEPS) $(TOOL_DEPS)
+	rm -f $(OBJS) $(TOOL_OBJS)
 	rm -f $(PROG)
+	rm -f $(LIB)
+	rm -f $(TOOLS)
 
 distclean: clean
 	rm -f *~ */*~
@@ -85,3 +112,4 @@ distclean: clean
 	rm -f *.d */*.d
 
 -include $(CPP_DEPS)
+-include $(TOOL_DEPS)

@@ -53,42 +53,7 @@
 #include "network.hpp"
 #include "injection.hpp"
 #include "power_module.hpp"
-
-
-
-///////////////////////////////////////////////////////////////////////////////
-//Global declarations
-//////////////////////
-
- /* the current traffic manager instance */
-TrafficManager * trafficManager = NULL;
-
-int GetSimTime() {
-  return trafficManager->getTime();
-}
-
-class Stats;
-Stats * GetStats(const std::string & name) {
-  Stats* test =  trafficManager->getStats(name);
-  if(test == 0){
-    cout<<"warning statistics "<<name<<" not found"<<endl;
-  }
-  return test;
-}
-
-/* printing activity factor*/
-bool gPrintActivity;
-
-int gK;//radix
-int gN;//dimension
-int gC;//concentration
-
-int gNodes;
-
-//generate nocviewer trace
-bool gTrace;
-
-ostream * gWatchOut;
+#include "booksim_init.hpp"
 
 
 
@@ -163,21 +128,10 @@ int main( int argc, char **argv )
  } 
 
   
-  /*initialize routing, traffic, injection functions
+  /*initialize routing, traffic, injection functions and the process-wide
+   *globals; shared with the library build so both paths set up identically
    */
-  InitializeRoutingMap( config );
-
-  gPrintActivity = (config.GetInt("print_activity") > 0);
-  gTrace = (config.GetInt("viewer_trace") > 0);
-  
-  string watch_out_file = config.GetStr( "watch_out" );
-  if(watch_out_file == "") {
-    gWatchOut = NULL;
-  } else if(watch_out_file == "-") {
-    gWatchOut = &cout;
-  } else {
-    gWatchOut = new ofstream(watch_out_file.c_str());
-  }
+  BooksimGlobalInit( config );
   
 
   /*configure and run the simulator

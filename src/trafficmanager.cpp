@@ -36,6 +36,7 @@
 #include "booksim_config.hpp"
 #include "trafficmanager.hpp"
 #include "batchtrafficmanager.hpp"
+#include "flowtrafficmanager.hpp"
 #include "random_utils.hpp" 
 #include "vc.hpp"
 #include "packet_reply_info.hpp"
@@ -49,6 +50,10 @@ TrafficManager * TrafficManager::New(Configuration const & config,
         result = new TrafficManager(config, net);
     } else if(sim_type == "batch") {
         result = new BatchTrafficManager(config, net);
+    } else if(sim_type == "flow") {
+        // Externally driven: the caller owns the clock and supplies the
+        // workload. Never runs the convergence loop.
+        result = new FlowTrafficManager(config, net);
     } else {
         cerr << "Unknown simulation type: " << sim_type << endl;
     } 
@@ -1011,6 +1016,15 @@ void TrafficManager::_Step( )
     for(int subnet = 0; subnet < _subnets; ++subnet) {
 
         for(int n = 0; n < _nodes; ++n) {
+
+            // Injection bypasses the routers (Network::WriteFlit sends straight
+            // into _inject[n]), so a rate-limited endpoint link needs its own
+            // gate. Skip the whole body rather than abandoning later: the VC
+            // selection below commits cf->vc before dest_buf->TakeBuffer(), and
+            // bailing out after that leaves a half-claimed VC.
+            if(!_net[subnet]->GetInject(n)->IsReady()) {
+                continue;
+            }
 
             Flit * f = NULL;
 
