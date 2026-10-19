@@ -2,6 +2,7 @@
 
 /*
  Copyright (c) 2007-2015, Trustees of The Leland Stanford Junior University
+ Copyright (c) 2026, Jiaqi Lou
  All rights reserved.
 
  Redistribution and use in source and binary forms, with or without
@@ -29,7 +30,7 @@
  *
  * Definitions of the process-wide globals declared in globals.hpp.
  *
- * These lived in main.cpp historically. They were moved here so that the
+ * Upstream BookSim defines these in main.cpp. They live here so that the
  * simulator can be archived into libbooksim.a without dragging in main(),
  * which lets it be embedded in another program (see engine/booksim_engine.hpp).
  * main.cpp is still the only caller for the standalone booksim binary.

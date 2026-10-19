@@ -111,6 +111,7 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
   
     _lookahead_routing = !config.GetInt("routing_delay");
     _noq = config.GetInt("noq");
+    _noq_vcs_per_output = config.GetInt("noq_vcs_per_output");
     if(_noq) {
         if(!_lookahead_routing) {
             Error("NOQ requires lookahead routing to be enabled.");
@@ -293,6 +294,7 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
     _requestsOutstanding.resize(_nodes);
 
     _hold_switch_for_packet = config.GetInt("hold_switch_for_packet");
+    _whole_tlp = (config.GetInt("whole_tlp") > 0);
 
     // ============ Simulation parameters ============ 
 
@@ -1034,16 +1036,23 @@ void TrafficManager::_Step( )
 
             int class_limit = _classes;
 
-            if(_hold_switch_for_packet) {
+            if(_hold_switch_for_packet || _whole_tlp) {
                 list<Flit *> const & pp = _partial_packets[n][last_class];
-                if(!pp.empty() && !pp.front()->head && 
-                   !dest_buf->IsFullFor(pp.front()->vc)) {
+                bool const mid_tlp = !pp.empty() && !pp.front()->head;
+                if(mid_tlp && !dest_buf->IsFullFor(pp.front()->vc, pp.front())) {
                     f = pp.front();
                     assert(f->vc == _last_vc[n][subnet][last_class]);
 
-                    // if we're holding the connection, we don't need to check that class 
+                    // if we're holding the connection, we don't need to check that class
                     // again in the for loop
                     --class_limit;
+                }
+                // whole_tlp: no other class may start or continue a packet on
+                // this link before the open TLP's tail, not even one of higher
+                // priority. The head was admitted with room for the whole TLP
+                // and nothing else uses the link, so the TLP cannot stall here.
+                if(mid_tlp && _whole_tlp) {
+                    class_limit = 0;
                 }
             }
 
@@ -1103,9 +1112,13 @@ void TrafficManager::_Step( )
                         set<OutputSet::sSetElement> const sl = cf->la_route_set.GetSet();
                         assert(sl.size() == 1);
                         int next_output = sl.begin()->output_port;
-                        vc_count /= router->NumOutputs();
-                        vc_start += next_output * vc_count;
-                        vc_end = vc_start + vc_count - 1;
+                        if(!NoqVcSlice(se.vc_start, se.vc_end, next_output,
+                                       router->NumOutputs(), _noq_vcs_per_output,
+                                       vc_start, vc_end)) {
+                            Error("NOQ: the injection VC range is too small for "
+                                  "the first switch's outputs; raise num_vcs");
+                        }
+                        vc_count = vc_end - vc_start + 1;
                         assert(vc_start >= se.vc_start && vc_start <= se.vc_end);
                         assert(vc_end >= se.vc_start && vc_end <= se.vc_end);
                         assert(vc_start <= vc_end);
@@ -1128,7 +1141,7 @@ void TrafficManager::_Step( )
                                            << "  Output VC " << vc << " is busy." << endl;
                             }
                         } else {
-                            if(dest_buf->IsFullFor(vc)) {
+                            if(dest_buf->IsFullFor(vc, cf)) {
                                 if(cf->watch) {
                                     *gWatchOut << GetSimTime() << " | " << FullName() << " | "
                                                << "  Output VC " << vc << " is full." << endl;
@@ -1152,7 +1165,7 @@ void TrafficManager::_Step( )
                                    << "." << endl;
                     }
                 } else {
-                    if(dest_buf->IsFullFor(cf->vc)) {
+                    if(dest_buf->IsFullFor(cf->vc, cf)) {
                         if(cf->watch) {
                             *gWatchOut << GetSimTime() << " | " << FullName() << " | "
                                        << "Selected output VC " << cf->vc
@@ -1266,6 +1279,7 @@ void TrafficManager::_Step( )
                 }
                 Credit * const c = Credit::New();
                 c->vc.insert(f->vc);
+                c->AddPcieReturn(f->vc, f);
                 _net[subnet]->WriteCredit(c, n);
 	
 #ifdef TRACK_FLOWS

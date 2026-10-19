@@ -3,13 +3,13 @@
 
 The output is a dependency graph of point-to-point transfers, which is what a
 collective actually is once the algorithm is fixed. Dependencies are on the
-RECEIVE side: rank i cannot forward its step k+1 chunk until the step k chunk
+receive side: rank i cannot forward its step k+1 chunk until the step k chunk
 from rank i-1 has arrived. That is what makes the trace a real critical path
 rather than a bag of independent flows.
 
-This is the stand-in for SimCCL. It covers the textbook algorithms so topology
-ranking can start before the astra-sim build exists; SimCCL later supplies the
-same shape of schedule with NCCL's actual channel and chunk decomposition.
+It covers the textbook algorithms, for running booksim_flowtest without SimAI.
+Under SimAI, SimCCL supplies the same shape of schedule with NCCL's actual
+channel and chunk decomposition.
 
 Trace line format (see src/tools/booksim_flowtest.cpp):
     <id> <src> <dst> <bytes> [after=<id>[,<id>...]] [at=<ns>] [class=P|NP|Cpl]
@@ -181,17 +181,30 @@ def reducescatter(t, n, total_bytes):
     return [f for f in prev.values() if f is not None]
 
 
-def alltoall(t, n, total_bytes):
+def alltoall_destinations(i, n, order):
+    """Destination order for rank i. Each source sends one flow at a time, so
+    with `naive` (ascending) every source starts on rank 0 and the first steps
+    are an incast; `shift` (i+1, i+2, ...) and `xor` (i^1, i^2, ...) make each
+    step a permutation instead."""
+    if order == "naive":
+        return [j for j in range(n) if j != i]
+    if order == "shift":
+        return [(i + k) % n for k in range(1, n)]
+    if order == "xor":
+        return [i ^ k for k in range(1, n)]
+    raise ValueError("unknown all-to-all order %r" % order)
+
+
+def alltoall(t, n, total_bytes, order="shift"):
     """Direct all-to-all: every rank sends a distinct 1/N chunk to every other.
     No dependencies -- it is a pure fabric stress test."""
     chunk = total_bytes // n
     out = []
     for i in range(n):
-        for j in range(n):
-            if i != j:
-                f = t.add(i, j, chunk)
-                if f is not None:
-                    out.append(f)
+        for j in alltoall_destinations(i, n, order):
+            f = t.add(i, j, chunk)
+            if f is not None:
+                out.append(f)
     return out
 
 
@@ -201,7 +214,7 @@ ALGORITHMS = {
     "tree":         lambda t, a: binomial_tree_allreduce(t, a.nodes, a.size),
     "allgather":    lambda t, a: allgather(t, a.nodes, a.size),
     "reducescatter":lambda t, a: reducescatter(t, a.nodes, a.size),
-    "alltoall":     lambda t, a: alltoall(t, a.nodes, a.size),
+    "alltoall":     lambda t, a: alltoall(t, a.nodes, a.size, a.a2a_order),
 }
 
 
@@ -220,11 +233,17 @@ def main():
                          "e.g. 0,1,2,3,6,7,4,5 means logical rank 0 sits on node 0, "
                          "rank 1 on node 1, etc. Models GPU placement and applies to "
                          "every algorithm, not just the ring-shaped ones.")
+    ap.add_argument("--a2a-order", choices=["shift", "xor", "naive"], default="shift",
+                    help="destination order of each rank in alltoall (default shift). "
+                         "naive is ascending, which makes every source start on rank 0 "
+                         "(an incast); kept only to reproduce old numbers.")
     ap.add_argument("-o", "--out", default="-", help="output file, or - for stdout")
     args = ap.parse_args()
 
     if args.nodes < 2:
         sys.exit("need at least 2 ranks")
+    if args.algo == "alltoall" and args.a2a_order == "xor" and args.nodes & (args.nodes - 1):
+        sys.exit("--a2a-order xor needs a power-of-two rank count")
     if args.size < args.nodes:
         sys.exit("size must be at least one byte per rank")
 
@@ -239,8 +258,10 @@ def main():
     if not t.lines:
         sys.exit("algorithm produced no transfers")
 
-    header = ("%s, %d ranks, %d B per rank, %d flows%s"
-              % (args.algo, args.nodes, args.size, t.next_id,
+    header = ("%s%s, %d ranks, %d B per rank, %d flows%s"
+              % (args.algo,
+                 (" " + args.a2a_order) if args.algo == "alltoall" else "",
+                 args.nodes, args.size, t.next_id,
                  (", order " + args.order) if args.order else ""))
     if args.out == "-":
         t.emit(sys.stdout, header)

@@ -1,0 +1,16 @@
+router 0 domain 0 node 0 port_type downstream domain 0 lat 1 gen 5 width 16
+router 0 domain 0 node 1 port_type downstream domain 0 lat 1 gen 5 width 16
+router 1 domain 0 node 2 port_type downstream domain 0 lat 1 gen 5 width 16
+router 1 domain 0 node 3 port_type downstream domain 0 lat 1 gen 5 width 16
+router 2 domain 0 node 4 port_type downstream domain 0 lat 1 gen 5 width 16
+router 2 domain 0 node 5 port_type downstream domain 0 lat 1 gen 5 width 16
+router 3 domain 0 node 6 port_type downstream domain 0 lat 1 gen 5 width 16
+router 3 domain 0 node 7 port_type downstream domain 0 lat 1 gen 5 width 16
+router 0 router 1 port_type generic link_type transparent lat 2 gen 5 width 16
+router 0 router 2 port_type generic link_type transparent lat 2 gen 5 width 16
+router 0 router 3 port_type generic link_type transparent lat 2 gen 5 width 16
+router 1 router 2 port_type generic link_type transparent lat 2 gen 5 width 16
+router 1 router 3 port_type generic link_type transparent lat 2 gen 5 width 16
+router 2 router 3 port_type generic link_type transparent lat 2 gen 5 width 16
+# node 8: inert NVSwitch placeholder required by SimCCL (see runfiles/pcie_simai_flat.txt)
+router 0 node 8 lat 1 gen 5 width 16

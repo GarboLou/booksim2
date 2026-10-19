@@ -32,6 +32,8 @@
 
 #include "booksim.hpp"
 #include "credit.hpp"
+#include "flit.hpp"
+#include "pcie_credits.hpp"
 
 stack<Credit *> Credit::_all;
 stack<Credit *> Credit::_free;
@@ -44,9 +46,21 @@ Credit::Credit()
 void Credit::Reset()
 {
   vc.clear();
+  pcie.clear();
   head = false;
   tail = false;
   id   = -1;
+}
+
+void Credit::AddPcieReturn( int in_vc, Flit const * f )
+{
+  if(f->pcie_payload < 0) return;
+  PcieReturn r;
+  r.vc   = in_vc;
+  r.type = PcieTypeOfFlit(f->type);
+  r.hdr  = f->tail ? 1 : 0;
+  r.data = f->pcie_data_ret;
+  if(r.hdr || r.data) pcie.push_back(r);
 }
 
 Credit * Credit::New() {
@@ -66,11 +80,13 @@ void Credit::Free() {
   _free.push(this);
 }
 
+// See Flit::FreeAll: the free list points into the deleted objects.
 void Credit::FreeAll() {
   while(!_all.empty()) {
     delete _all.top();
     _all.pop();
   }
+  while(!_free.empty()) _free.pop();
 }
 
 

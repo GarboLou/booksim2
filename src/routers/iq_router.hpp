@@ -102,7 +102,17 @@ class IQRouter : public Router {
   vector<int> _switch_hold_out;
   vector<int> _switch_hold_vc;
 
+  // whole_tlp: a packet keeps its switch connection from head to tail, so
+  // every output link carries each TLP whole, as PCIe does. Stock
+  // hold_switch_for_packet lets go whenever the input runs dry, which in
+  // cut-through operation is after nearly every flit. A head starts only if
+  // its input link is at least as fast as the output (cut-through) or its
+  // tail has arrived (store-and-forward), so the output never idles mid-TLP.
+  bool _whole_tlp;
+  bool _TlpCanStart(int input, int vc, int output) const;
+
   bool _noq;
+  int  _noq_vcs_per_output;
   vector<vector<int> > _noq_next_output_port;
   vector<vector<int> > _noq_next_vc_start;
   vector<vector<int> > _noq_next_vc_end;
@@ -174,6 +184,7 @@ public:
   virtual vector<int> UsedCredits() const;
   virtual vector<int> FreeCredits() const;
   virtual vector<int> MaxCredits() const;
+  virtual bool PcieCreditsIdle() const;
 
   SwitchMonitor const * const GetSwitchMonitor() const {return _switchMonitor;}
   BufferMonitor const * const GetBufferMonitor() const {return _bufferMonitor;}

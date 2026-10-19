@@ -9,10 +9,10 @@ place_search.py (reader). Centralized here so the grammar can't drift between
 independent hand-written copies.
 
 class= is the PCIe ordering class (Posted/Non-Posted/Completion) for the
-VC-range/credit-pool separation described in PCIE_MODEL_LIMITATIONS.md.
-Omitted = untagged, which is the full undivided VC pool -- exactly the
-pre-existing behavior, so every trace written before this field existed
-still means the same thing.
+VC-range/credit-pool separation (pools only; PCIe ordering rules are not
+enforced).
+Omitted = untagged, which is the full undivided VC pool, as in stock
+BookSim.
 """
 
 PCIE_CLASSES = ("P", "NP", "Cpl")

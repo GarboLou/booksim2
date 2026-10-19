@@ -1997,3 +1997,13 @@ void InitializeRoutingMap( const Configuration & config )
   gRoutingFunctionMap["chaos_mesh"]  = &chaos_mesh;
   gRoutingFunctionMap["chaos_torus"] = &chaos_torus;
 }
+
+bool NoqVcSlice( int range_start, int range_end, int next_output, int num_outputs,
+                 int per_output, int & vc_start, int & vc_end )
+{
+  int const count = (per_output > 0) ? per_output
+                                     : (range_end - range_start + 1) / num_outputs;
+  vc_start = range_start + next_output * count;
+  vc_end   = vc_start + count - 1;
+  return (count > 0) && (vc_end <= range_end);
+}

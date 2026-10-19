@@ -557,6 +557,15 @@ BufferState::BufferState( const Configuration& config, Module *parent, const str
   _last_id.resize(_vcs, -1);
   _last_pid.resize(_vcs, -1);
 
+  _pcie = ReadPcieCreditLimits(config);
+  for(int t = 0; t < PCIE_NUM_TYPES; ++t) {
+    _pcie_hdr_used[t] = 0;
+    _pcie_data_used[t] = 0;
+  }
+  _whole_tlp    = _pcie.enabled && (config.GetInt("whole_tlp") > 0);
+  _tlp_overhead = config.GetInt("pcie_tlp_overhead_bytes");
+  _flit_bytes   = config.GetInt("flit_bytes");
+
 #ifdef TRACK_BUFFERS
   _classes = config.GetInt("classes");
   _outstanding_classes.resize(_vcs);
@@ -614,6 +623,50 @@ void BufferState::ProcessCredit( Credit const * const c )
 
     ++iter;
   }
+
+  for(size_t i = 0; i < c->pcie.size(); ++i) {
+    Credit::PcieReturn const & r = c->pcie[i];
+    if(!_pcie.enabled) {
+      Error("PCIe credit record received with pcie_credits = 0");
+    }
+    if(r.type < 0 || r.type >= PCIE_NUM_TYPES) {
+      Error("PCIe credit record without a transaction type");
+    }
+    _pcie_hdr_used[r.type]  -= r.hdr;
+    _pcie_data_used[r.type] -= r.data;
+    if(_pcie_hdr_used[r.type] < 0 || _pcie_data_used[r.type] < 0) {
+      ostringstream err;
+      err << PcieTypeName(r.type) << " credits returned beyond what was reserved ("
+          << _pcie_hdr_used[r.type] << " headers, " << _pcie_data_used[r.type]
+          << " data credits in use)";
+      Error(err.str());
+    }
+  }
+}
+
+bool BufferState::CanAdmitTLP( Flit const * f ) const
+{
+  assert(f->head);
+  if(f->pcie_payload < 0) {
+    Error("pcie_credits = 1 needs packets with PCIe metadata (sim_type = flow)");
+  }
+  const int t = PcieTypeOfFlit(f->type);
+  if(t < 0) {
+    Error("pcie_credits = 1 needs every flow to have a PCIe type (P, NP or Cpl); "
+          "set pcie_default_class or tag the flow");
+  }
+  if(_pcie.hdr[t] >= 0 && _pcie_hdr_used[t] + 1 > _pcie.hdr[t]) return false;
+  if(_pcie.data[t] >= 0 &&
+     _pcie_data_used[t] + PcieDataUnits(f->pcie_payload) > _pcie.data[t]) return false;
+  return true;
+}
+
+bool BufferState::PcieCreditsIdle( ) const
+{
+  for(int t = 0; t < PCIE_NUM_TYPES; ++t) {
+    if(_pcie_hdr_used[t] != 0 || _pcie_data_used[t] != 0) return false;
+  }
+  return true;
 }
 
 
@@ -631,6 +684,17 @@ void BufferState::SendingFlit( Flit const * const f )
   ++_vc_occupancy[vc];
   
   _buffer_policy->SendingFlit(f);
+
+  if(_pcie.enabled && f->head) {
+    // The sender checked CanAdmitTLP before choosing this flit; failing here
+    // means a path skipped the check.
+    if(!CanAdmitTLP(f)) {
+      Error("TLP sent without enough PCIe header/data credits");
+    }
+    const int t = PcieTypeOfFlit(f->type);
+    _pcie_hdr_used[t]  += 1;
+    _pcie_data_used[t] += PcieDataUnits(f->pcie_payload);
+  }
   
 #ifdef TRACK_BUFFERS
   _outstanding_classes[vc].push(f->cl);

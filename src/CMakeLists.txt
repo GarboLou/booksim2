@@ -21,8 +21,8 @@ file(GLOB_RECURSE BOOKSIM_CPP CONFIGURE_DEPENDS
      "${BOOKSIM_SRC_DIR}/*.cpp"
      "${BOOKSIM_SRC_DIR}/*/*.cpp")
 
-# main() belongs to the standalone binary only; the globals it used to define
-# now live in booksim_globals.cpp so the library is self-contained without it.
+# main() belongs to the standalone binary only; the globals upstream defines in
+# main.cpp live in booksim_globals.cpp so the library is self-contained without it.
 list(REMOVE_ITEM BOOKSIM_CPP "${BOOKSIM_SRC_DIR}/main.cpp")
 
 # tools/*.cpp each define their own main(); they link against this library
@@ -31,9 +31,14 @@ file(GLOB BOOKSIM_TOOLS CONFIGURE_DEPENDS "${BOOKSIM_SRC_DIR}/tools/*.cpp")
 if(BOOKSIM_TOOLS)
   list(REMOVE_ITEM BOOKSIM_CPP ${BOOKSIM_TOOLS})
 endif()
+# Same for the unit tests (built and run by `make test` in the Makefile).
+file(GLOB BOOKSIM_TESTS CONFIGURE_DEPENDS "${BOOKSIM_SRC_DIR}/tests/*.cpp")
+if(BOOKSIM_TESTS)
+  list(REMOVE_ITEM BOOKSIM_CPP ${BOOKSIM_TESTS})
+endif()
 
-# The flex/lex and bison/yacc outputs are checked in, so the common case needs
-# neither tool. Regenerate only if they are missing.
+# Reuse the flex/bison outputs if they exist (for example from an earlier
+# `make` in this directory); otherwise generate them, which needs both tools.
 set(BOOKSIM_LEX  "${BOOKSIM_SRC_DIR}/lex.yy.c")
 set(BOOKSIM_YACC "${BOOKSIM_SRC_DIR}/y.tab.c")
 set(BOOKSIM_YACC_H "${BOOKSIM_SRC_DIR}/y.tab.h")

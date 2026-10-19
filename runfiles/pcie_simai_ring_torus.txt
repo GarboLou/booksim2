@@ -1,0 +1,42 @@
+# Ring Torus PCIe Topology: 4 switches + 8 GPUs
+#
+# Layout (1D ring / k=4 torus with 2 GPUs per switch):
+#
+#   [SW0] -- [SW1]
+#     |               |
+#   [SW3] -- [SW2]
+#
+#   Wrap-around: SW3 <-> SW0 (completing the ring)
+#
+#   SW0: GPUs 0,1
+#   SW1: GPUs 2,3
+#   SW2: GPUs 4,5
+#   SW3: GPUs 6,7
+#
+# Every switch has exactly 2 neighbors, max hop = 2 (opposite side of ring)
+# Compared to mesh: loses 2 cross-links (SW0-SW3, SW1-SW2 diagonals)
+# but adds wrap-arounds (SW0-SW3, SW1-SW2) -- which are the same links.
+# So: ring = mesh minus the cross-links SW0-SW3 diag & SW1-SW2 diag
+# (mesh has 4 links; ring has 4 links arranged as a cycle, not a grid)
+
+router 0 domain 0 node 0 port_type downstream domain 0 lat 1
+router 0 domain 0 node 1 port_type downstream domain 0 lat 1
+
+router 1 domain 0 node 2 port_type downstream domain 0 lat 1
+router 1 domain 0 node 3 port_type downstream domain 0 lat 1
+
+router 2 domain 0 node 4 port_type downstream domain 0 lat 1
+router 2 domain 0 node 5 port_type downstream domain 0 lat 1
+
+router 3 domain 0 node 6 port_type downstream domain 0 lat 1
+router 3 domain 0 node 7 port_type downstream domain 0 lat 1
+
+# Ring links: SW0-SW1-SW2-SW3-SW0
+router 0 router 1 port_type generic link_type transparent lat 2
+router 1 router 2 port_type generic link_type transparent lat 2
+router 2 router 3 port_type generic link_type transparent lat 2
+router 3 router 0 port_type generic link_type transparent lat 2
+
+# Node 8: inert NVSwitch placeholder required by SimCCL.
+# See pcie_simai_flat.txt for why it exists.
+router 0 node 8 lat 1 gen 5 width 16

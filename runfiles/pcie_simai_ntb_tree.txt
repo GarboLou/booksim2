@@ -1,0 +1,34 @@
+# NTB-Tree PCIe Topology: 4 switches + 8 GPUs
+#
+# Layout:
+#   Domain 0: Switch 0 (Root 0) -> Switch 2 (Leaf 0): GPUs 0,1,2,3
+#   Domain 1: Switch 1 (Root 1) -> Switch 3 (Leaf 1): GPUs 4,5,6,7
+#   Root 0 <-> Root 1: NTB (Non-Transparent Bridge) cross-domain link
+#
+# The NTB allows traffic to cross domain boundaries with domain translation overhead (lat 5)
+
+# Root switches (no GPUs attached directly)
+router 0 domain 0
+router 1 domain 1
+
+# Leaf switches with 4 GPUs each
+router 2 domain 0 node 0 port_type downstream domain 0 lat 1
+router 2 domain 0 node 1 port_type downstream domain 0 lat 1
+router 2 domain 0 node 2 port_type downstream domain 0 lat 1
+router 2 domain 0 node 3 port_type downstream domain 0 lat 1
+
+router 3 domain 1 node 4 port_type downstream domain 1 lat 1
+router 3 domain 1 node 5 port_type downstream domain 1 lat 1
+router 3 domain 1 node 6 port_type downstream domain 1 lat 1
+router 3 domain 1 node 7 port_type downstream domain 1 lat 1
+
+# Root-to-Leaf uplinks (intra-domain, transparent)
+router 0 router 2 port_type downstream link_type transparent lat 2
+router 1 router 3 port_type downstream link_type transparent lat 2
+
+# Root-to-Root NTB cross-domain bridge
+router 0 router 1 port_type ntb link_type nontransparent lat 5
+
+# Node 8: inert NVSwitch placeholder required by SimCCL.
+# See pcie_simai_flat.txt for why it exists.
+router 0 node 8 lat 1 gen 5 width 16

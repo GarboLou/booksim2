@@ -1,8 +1,9 @@
 // $Id$
 
 /*
- Copyright (c) 2007-2015, Trustees of The Leland Stanford Junior University
- All rights reserved. Distributed under the BookSim BSD license; see LICENSE.md.
+ Copyright (c) 2026, Jiaqi Lou
+ All rights reserved. Distributed under the same BSD license as BookSim; see
+ LICENSE.md.
 */
 
 // booksim_flowtest -- replay a collective communication schedule over a BookSim
@@ -20,13 +21,13 @@
 //     <id> <src> <dst> <bytes> [after=<id>[,<id>...]] [at=<ns>] [class=P|NP|Cpl]
 //
 // A flow is released when every flow named in `after` has been fully received
-// AND the clock has reached `at` (default 0). Dependencies are on the RECEIVE
+// and the clock has reached `at` (default 0). Dependencies are on the receive
 // side, which is what a ring collective needs: rank i cannot forward its
 // step k+1 chunk until it has received the step k chunk from rank i-1.
 //
 // class= is the PCIe ordering class (Posted/Non-Posted/Completion) for the
-// VC-range/credit-pool separation described in PCIE_MODEL_LIMITATIONS.md --
-// omitted means untagged, the full undivided VC pool (pre-existing behavior).
+// VC-range/credit-pool separation (pools only; PCIe ordering rules are not
+// enforced). Omitted means untagged: the full undivided VC pool.
 
 #include <cstdint>
 #include <cstdio>
@@ -274,6 +275,17 @@ int main(int argc, char ** argv) {
   if(!g_engine) Die("engine creation failed");
   g_engine->SetOnRecvComplete(&OnRecv, NULL);
 
+  // Rows stream in as flows complete (the engine keeps no flow history). They
+  // go to <csv>.partial, renamed to <csv> only if the run succeeds, so a run
+  // that fails or aborts never replaces a file under the requested name.
+  std::ofstream csv_out;
+  const std::string csv_partial = csv_file + ".partial";
+  if(!csv_file.empty()) {
+    csv_out.open(csv_partial.c_str());
+    if(!csv_out.is_open()) Die("cannot write " + csv_partial);
+    g_engine->SetFlowCsv(&csv_out);
+  }
+
   const int nodes = g_engine->NumNodes();
   for(size_t i = 0; i < g_flows.size(); ++i) {
     if(g_flows[i].src < 0 || g_flows[i].src >= nodes ||
@@ -366,15 +378,34 @@ int main(int argc, char ** argv) {
             << std::endl;
   std::cout << "flows outstanding    " << g_engine->FlowsOutstanding()
             << std::endl;
+  g_engine->DumpMultipathStats(std::cout);
+  g_engine->DumpPacketStats(std::cout);
+  bool credits_ok = true;
+  if(g_engine->PcieCreditsEnabled()) {
+    credits_ok = g_engine->PcieCreditsIdle();
+    std::cout << "pcie credits         " << (credits_ok ? "all returned" : "NOT RETURNED")
+              << std::endl;
+  }
 
   bool ok = (g_completed == g_flows.size()) && g_engine->IsIdle() &&
-            (g_engine->FlowsOutstanding() == 0);
+            (g_engine->FlowsOutstanding() == 0) && credits_ok;
 
+  // Publish the CSV under the requested name only if the run succeeded. A
+  // failed run keeps its rows in <csv>.partial and leaves any existing file
+  // under the requested name untouched.
   if(!csv_file.empty()) {
-    std::ofstream out(csv_file.c_str());
-    if(!out.is_open()) Die("cannot write " + csv_file);
-    g_engine->DumpFlowCsv(out);
-    std::cout << "per-flow csv         " << csv_file << std::endl;
+    g_engine->SetFlowCsv(NULL);
+    csv_out.close();
+    if(!csv_out) Die("cannot write " + csv_partial);
+    if(ok) {
+      if(std::rename(csv_partial.c_str(), csv_file.c_str()) != 0) {
+        Die("cannot rename " + csv_partial + " to " + csv_file);
+      }
+      std::cout << "per-flow csv         " << csv_file << std::endl;
+    } else {
+      std::cout << "per-flow csv         NOT WRITTEN (run failed); rows of completed "
+                << "flows are in " << csv_partial << std::endl;
+    }
   }
 
   delete g_engine;

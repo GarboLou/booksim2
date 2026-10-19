@@ -145,6 +145,10 @@ IQRouter::IQRouter( Configuration const & config, Module *parent,
     _sw_rr_offset[i] = i % _input_speedup;
   
   _noq = config.GetInt("noq") > 0;
+  _noq_vcs_per_output = config.GetInt("noq_vcs_per_output");
+  if(_noq_vcs_per_output < 0) {
+    Error("noq_vcs_per_output must be non-negative.");
+  }
   if(_noq) {
     if(_routing_delay) {
       Error("NOQ requires lookahead routing to be enabled.");
@@ -164,6 +168,18 @@ IQRouter::IQRouter( Configuration const & config, Module *parent,
 
   // Switch configuration (when held for multiple cycles)
   _hold_switch_for_packet = (config.GetInt("hold_switch_for_packet") > 0);
+  _whole_tlp = (config.GetInt("whole_tlp") > 0);
+  if(_whole_tlp) {
+    // A TLP must never stall half-sent while holding its output: whole-TLP
+    // credit admission guarantees room downstream for all of it.
+    if(config.GetInt("pcie_credits") <= 0) {
+      Error("whole_tlp = 1 needs pcie_credits = 1 (whole-TLP credit admission)");
+    }
+    if(_input_speedup != 1 || _output_speedup != 1) {
+      Error("whole_tlp = 1 needs input_speedup = output_speedup = 1");
+    }
+    _hold_switch_for_packet = true;
+  }
   _switch_hold_in.resize(_inputs*_input_speedup, -1);
   _switch_hold_out.resize(_outputs*_output_speedup, -1);
   _switch_hold_vc.resize(_inputs*_input_speedup, -1);
@@ -660,7 +676,7 @@ void IQRouter::_VCAllocEvaluate( )
 	  }
 	} else {
 	  elig = true;
-	  if(_vc_busy_when_full && dest_buf->IsFullFor(out_vc)) {
+	  if(_vc_busy_when_full && dest_buf->IsFullFor(out_vc, f)) {
 	    if(f->watch)
 	      *gWatchOut << GetSimTime() << " | " << FullName() << " | "
 			 << "  VC " << out_vc 
@@ -822,7 +838,7 @@ void IQRouter::_VCAllocEvaluate( )
 		     << " is no longer available." << endl;
 	}
 	iter->second.second = STALL_BUFFER_BUSY;
-      } else if(_vc_busy_when_full && dest_buf->IsFullFor(match_vc)) {
+      } else if(_vc_busy_when_full && dest_buf->IsFullFor(match_vc, f)) {
 	if(f->watch) {
 	  *gWatchOut << GetSimTime() << " | " << FullName() << " | "
 		     << "  Discarding previously generated grant for VC " << vc
@@ -978,7 +994,7 @@ void IQRouter::_SWHoldEvaluate( )
     
     BufferState const * const dest_buf = _next_buf[match_port];
     
-    if(dest_buf->IsFullFor(match_vc)) {
+    if(dest_buf->IsFullFor(match_vc, f)) {
       if(f->watch) {
 	*gWatchOut << GetSimTime() << " | " << FullName() << " | "
 		   << "  Unable to reuse held connection from input " << input
@@ -1127,8 +1143,12 @@ void IQRouter::_SWHoldUpdate( )
 	_out_queue_credits.insert(make_pair(input, Credit::New()));
       }
       _out_queue_credits.find(input)->second->vc.insert(vc);
+      _out_queue_credits.find(input)->second->AddPcieReturn(vc, f);
       
-      if(cur_buf->Empty(vc)) {
+      if(cur_buf->Empty(vc) && _whole_tlp && !f->tail) {
+	// whole_tlp: the rest of this packet is still on its way; keep the
+	// connection. Its next flit rejoins _sw_hold_vcs on arrival.
+      } else if(cur_buf->Empty(vc)) {
 	if(f->watch) {
 	  *gWatchOut << GetSimTime() << " | " << FullName() << " | "
 		     << "  Cancelling held connection from input " << input
@@ -1197,7 +1217,16 @@ void IQRouter::_SWHoldUpdate( )
 
       int const held_expanded_output = _switch_hold_in[expanded_input];
       assert(held_expanded_output >= 0);
-      
+
+      if(_whole_tlp) {
+	// whole_tlp: a full output queue only delays the rest of the TLP;
+	// never hand its link to another packet mid-TLP. Credits for the
+	// whole TLP were reserved with its head, so this clears.
+	_sw_hold_vcs.push_back(make_pair(-1, make_pair(item.second.first, -1)));
+	_sw_hold_vcs.pop_front();
+	continue;
+      }
+
       if(f->watch) {
 	*gWatchOut << GetSimTime() << " | " << FullName() << " | "
 		   << "  Cancelling held connection from input " << input
@@ -1221,6 +1250,17 @@ void IQRouter::_SWHoldUpdate( )
 // switch allocation
 //------------------------------------------------------------------------------
 
+bool IQRouter::_TlpCanStart(int input, int vc, int output) const
+{
+  // Cut-through only if the rest of the TLP arrives at least as fast as the
+  // output sends it; otherwise the output would idle mid-TLP.
+  if(_input_channels[input]->GetCyclesPerFlit() <=
+     _output_channels[output]->GetCyclesPerFlit()) {
+    return true;
+  }
+  return _buf[input]->FrontPacketBuffered(vc);
+}
+
 bool IQRouter::_SWAllocAddReq(int input, int vc, int output)
 {
   assert(input >= 0 && input < _inputs);
@@ -1242,8 +1282,12 @@ bool IQRouter::_SWAllocAddReq(int input, int vc, int output)
   Flit const * const f = cur_buf->FrontFlit(vc);
   assert(f);
   assert(f->vc == vc);
-  
-  if((_switch_hold_in[expanded_input] < 0) && 
+
+  if(_whole_tlp && f->head && !_TlpCanStart(input, vc, output)) {
+    return false;   // store-and-forward: wait for the tail
+  }
+
+  if((_switch_hold_in[expanded_input] < 0) &&
      (_switch_hold_out[expanded_output] < 0)) {
     
     Allocator * allocator = _sw_allocator;
@@ -1372,7 +1416,7 @@ void IQRouter::_SWAllocEvaluate( )
       
       BufferState const * const dest_buf = _next_buf[dest_output];
       
-      if(dest_buf->IsFullFor(dest_vc) || ( _output_buffer_size!=-1  && _output_buffer[dest_output].size()>=(size_t)(_output_buffer_size))) {
+      if(dest_buf->IsFullFor(dest_vc, f) || ( _output_buffer_size!=-1  && _output_buffer[dest_output].size()>=(size_t)(_output_buffer_size))) {
 	if(f->watch) {
 	  *gWatchOut << GetSimTime() << " | " << FullName() << " | "
 		     << "  VC " << dest_vc 
@@ -1441,7 +1485,7 @@ void IQRouter::_SWAllocEvaluate( )
 	  
 	  if(dest_buf->IsAvailableFor(dest_vc) && ( _output_buffer_size==-1 || _output_buffer[dest_output].size()<(size_t)(_output_buffer_size))) {
 	    elig = true;
-	    if(!_spec_check_cred || !dest_buf->IsFullFor(dest_vc)) {
+	    if(!_spec_check_cred || !dest_buf->IsFullFor(dest_vc, f)) {
 	      cred = true;
 	      break;
 	    }
@@ -1724,7 +1768,7 @@ void IQRouter::_SWAllocEvaluate( )
 			 << " due to port mismatch between VC and switch allocator." << endl;
 	    }
 	    iter->second.second = STALL_BUFFER_CONFLICT; // count this case as if we had failed allocation
-	  } else if(dest_buf->IsFullFor((output_and_vc % _vcs))) {
+	  } else if(dest_buf->IsFullFor((output_and_vc % _vcs), f)) {
 	    if(f->watch) {
 	      *gWatchOut << GetSimTime() << " | " << FullName() << " | "
 			 << "Discarding grant from input " << input
@@ -1773,7 +1817,7 @@ void IQRouter::_SWAllocEvaluate( )
 		assert((out_vc >= 0) && (out_vc < _vcs));
 		if(dest_buf->IsAvailableFor(out_vc)) {
 		  busy = false;
-		  if(!dest_buf->IsFullFor(out_vc)) {
+		  if(!dest_buf->IsFullFor(out_vc, f)) {
 		    full = false;
 		    break;
 		  } else if(!dest_buf->IsFull()) {
@@ -1817,7 +1861,7 @@ void IQRouter::_SWAllocEvaluate( )
 	int const match_vc = cur_buf->GetOutputVC(vc);
 	assert((match_vc >= 0) && (match_vc < _vcs));
 
-	if(dest_buf->IsFullFor(match_vc)) {
+	if(dest_buf->IsFullFor(match_vc, f)) {
 	  if(f->watch) {
 	    *gWatchOut << GetSimTime() << " | " << FullName() << " | "
 		       << "  Discarding grant from input " << input
@@ -1933,7 +1977,7 @@ void IQRouter::_SWAllocUpdate( )
 	      // not Update(), as the latter can cause the outcome to depend on 
 	      // the order of evaluation!
 	      if(dest_buf->IsAvailableFor(out_vc) && 
-		 !dest_buf->IsFullFor(out_vc) &&
+		 !dest_buf->IsFullFor(out_vc, f) &&
 		 ((match_vc < 0) || 
 		  RoundRobinArbiter::Supersedes(out_vc, vc_prio, 
 						match_vc, match_prio, 
@@ -2037,10 +2081,17 @@ void IQRouter::_SWAllocUpdate( )
 	_out_queue_credits.insert(make_pair(input, Credit::New()));
       }
       _out_queue_credits.find(input)->second->vc.insert(vc);
+      _out_queue_credits.find(input)->second->AddPcieReturn(vc, f);
 
       if(cur_buf->Empty(vc)) {
 	if(f->tail) {
 	  cur_buf->SetState(vc, VC::idle);
+	} else if(_whole_tlp) {
+	  // whole_tlp: reserve the connection for the rest of this packet;
+	  // its next flit joins _sw_hold_vcs when it arrives.
+	  _switch_hold_vc[expanded_input] = vc;
+	  _switch_hold_in[expanded_input] = expanded_output;
+	  _switch_hold_out[expanded_output] = expanded_input;
 	}
       } else {
 	Flit * const nf = cur_buf->FrontFlit(vc);
@@ -2349,6 +2400,14 @@ vector<int> IQRouter::MaxCredits() const
   return result;
 }
 
+bool IQRouter::PcieCreditsIdle() const
+{
+  for(int o = 0; o < _outputs; ++o) {
+    if(!_next_buf[o]->PcieCreditsIdle()) return false;
+  }
+  return true;
+}
+
 void IQRouter::_UpdateNOQ(int input, int vc, Flit const * f) {
   assert(!_routing_delay);
   assert(f);
@@ -2370,12 +2429,19 @@ void IQRouter::_UpdateNOQ(int input, int vc, Flit const * f) {
     assert(next_output_port >= 0);
     assert(_noq_next_output_port[input][vc] < 0);
     _noq_next_output_port[input][vc] = next_output_port;
-    int next_vc_count = (se.vc_end - se.vc_start + 1) / router->NumOutputs();
-    int next_vc_start = se.vc_start + next_output_port * next_vc_count;
+    int next_vc_start, next_vc_end;
+    if(!NoqVcSlice(se.vc_start, se.vc_end, next_output_port, router->NumOutputs(),
+                   _noq_vcs_per_output, next_vc_start, next_vc_end)) {
+      ostringstream err;
+      err << "NOQ: VC range [" << se.vc_start << "," << se.vc_end << "] cannot "
+          << "give output " << next_output_port << " of " << router->FullName()
+          << " (" << router->NumOutputs() << " outputs) its VCs; raise num_vcs "
+          << "or widen the per-type VC ranges.";
+      Error(err.str());
+    }
     assert(next_vc_start >= 0 && next_vc_start < _vcs);
     assert(_noq_next_vc_start[input][vc] < 0);
     _noq_next_vc_start[input][vc] = next_vc_start;
-    int next_vc_end = se.vc_start + (next_output_port + 1) * next_vc_count - 1;
     assert(next_vc_end >= 0 && next_vc_end < _vcs);
     assert(_noq_next_vc_end[input][vc] < 0);
     _noq_next_vc_end[input][vc] = next_vc_end;

@@ -49,8 +49,15 @@ TOOL_OBJS = $(TOOL_SRCS:.cpp=.o)
 TOOL_DEPS = $(TOOL_SRCS:.cpp=.d)
 TOOLS     = $(TOOL_SRCS:.cpp=)
 
+# Unit tests: built like the tools, and run by `make test` from the booksim2
+# root (their configs name runfiles/ relative to it).
+TEST_SRCS = $(wildcard tests/*.cpp)
+TEST_OBJS = $(TEST_SRCS:.cpp=.o)
+TEST_DEPS = $(TEST_SRCS:.cpp=.d)
+TESTS     = $(TEST_SRCS:.cpp=)
+
 # simulator source files
-CPP_SRCS = $(filter-out $(TOOL_SRCS),$(wildcard *.cpp) $(wildcard */*.cpp))
+CPP_SRCS = $(filter-out $(TOOL_SRCS) $(TEST_SRCS),$(wildcard *.cpp) $(wildcard */*.cpp))
 CPP_HDRS = $(wildcard *.hpp) $(wildcard */*.hpp)
 CPP_DEPS = $(CPP_SRCS:.cpp=.d)
 CPP_OBJS = $(CPP_SRCS:.cpp=.o)
@@ -65,10 +72,11 @@ YACC_OBJS = y.tab.o
 OBJS :=  $(CPP_OBJS) $(LEX_OBJS) $(YACC_OBJS)
 
 # Everything except main(), so the simulator can be embedded in another program.
-# The globals main.cpp used to define now live in booksim_globals.cpp.
+# The globals upstream defines in main.cpp live in booksim_globals.cpp.
 LIB_OBJS := $(filter-out main.o,$(CPP_OBJS)) $(LEX_OBJS) $(YACC_OBJS)
 
-.PHONY: clean all
+.PHONY: clean all test
+.SECONDARY: $(TEST_OBJS)
 
 all: $(PROG) $(LIB) $(TOOLS)
 
@@ -81,6 +89,12 @@ $(LIB): $(LIB_OBJS)
 # Link order matters: the archive must follow the object that references it.
 tools/%: tools/%.o $(LIB)
 	$(CXX) $(LFLAGS) $< $(LIB) -o $@
+
+tests/%: tests/%.o $(LIB)
+	$(CXX) $(LFLAGS) $< $(LIB) -o $@
+
+test: $(TESTS)
+	@cd .. && for t in $(TESTS); do echo "== $$t"; src/$$t || exit 1; done
 
 $(LEX_SRCS): config.l
 	$(LEX) $<
@@ -105,6 +119,7 @@ clean:
 	rm -f $(PROG)
 	rm -f $(LIB)
 	rm -f $(TOOLS)
+	rm -f $(TEST_DEPS) $(TEST_OBJS) $(TESTS)
 
 distclean: clean
 	rm -f *~ */*~
@@ -113,3 +128,4 @@ distclean: clean
 
 -include $(CPP_DEPS)
 -include $(TOOL_DEPS)
+-include $(TEST_DEPS)

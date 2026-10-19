@@ -1,0 +1,6 @@
+# Test topology: same-domain pair 1 -> 2 has no route inside domain 1.
+router 0 domain 0 node 0 lat 1
+router 1 domain 1 node 1 lat 1
+router 2 domain 1 node 2 lat 1
+router 0 router 1 lat 1 cpf 2
+router 0 router 2 lat 1 cpf 3

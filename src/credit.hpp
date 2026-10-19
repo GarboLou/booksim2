@@ -30,12 +30,30 @@
 
 #include <set>
 #include <stack>
+#include <vector>
+
+class Flit;
 
 class Credit {
 
 public:
 
   set<int> vc;
+
+  // PCIe protocol credits returned with this message (pcie_credits = 1),
+  // one record per input VC that freed a flit. Physical flit slots still
+  // return through `vc`.
+  struct PcieReturn {
+    int vc;
+    int type;   // PCIE_P / PCIE_NP / PCIE_CPL
+    int hdr;    // 1 when the TLP's tail left the queue
+    int data;   // 16 B data credits
+  };
+  vector<PcieReturn> pcie;
+
+  // Record what flit f returns on leaving input VC in_vc; nothing if f
+  // carries no PCIe metadata.
+  void AddPcieReturn( int in_vc, Flit const * f );
 
   // these are only used by the event router
   bool head, tail;

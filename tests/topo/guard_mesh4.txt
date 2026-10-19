@@ -1,0 +1,13 @@
+# Deadlock-guard case: a 4-switch
+# full mesh split into domains {0,1} and {2,3}. Global shortest routes are one
+# hop, but per-bridge two-hop routes can close a cycle.
+router 0 domain 0 node 0 lat 1
+router 1 domain 0 node 1 lat 1
+router 2 domain 1 node 2 lat 1
+router 3 domain 1 node 3 lat 1
+router 0 router 1 lat 1
+router 0 router 2 lat 1
+router 0 router 3 lat 1
+router 1 router 2 lat 1
+router 1 router 3 lat 1
+router 2 router 3 lat 1

@@ -1,0 +1,6 @@
+# Flat baseline: 8 GPUs on a single PCIe switch, Gen5 x16 throughout.
+# Node 8 is an inert NVSwitch placeholder required by SimCCL: MockNcclComm
+# always builds NVLS channels and indexes GroupInfo::NVSwitchs[0], which
+# segfaults on an empty vector. It carries no traffic under ring/tree, and
+# SimAI_booksim refuses the flag combination that would select NVLS.
+router 0 node 0 lat 1 gen 5 width 16 node 1 lat 1 gen 5 width 16 node 2 lat 1 gen 5 width 16 node 3 lat 1 gen 5 width 16 node 4 lat 1 gen 5 width 16 node 5 lat 1 gen 5 width 16 node 6 lat 1 gen 5 width 16 node 7 lat 1 gen 5 width 16 node 8 lat 1 gen 5 width 16

@@ -3,3 +3,25 @@
 ._*
 .Apple*
 .DS_Store
+__pycache__/
+
+# Sweep harness output (utils/sweep.py): regeneratable from the sweep spec,
+# except the small results files, which are the actual findings worth
+# keeping.
+/runfiles/generated/*
+!/runfiles/generated/results/
+/runfiles/generated/results/*
+!/runfiles/generated/results/sweep_results.csv
+!/runfiles/generated/results/sweep_summary.txt
+
+# Stray output: SimAI writes these CSVs into whatever directory it runs from;
+# .bob/ is an editor tool's artifact folder.
+/booksim_EndToEnd.csv
+/ncclFlowModel_detailed_flows.csv
+/.bob/
+
+# Kept local, not published: design/review docs, the review agent's folder
+# and experiment results.
+/PCIE_*.md
+/verification/
+/experiments/

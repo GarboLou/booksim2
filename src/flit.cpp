@@ -80,6 +80,10 @@ void Flit::Reset()
   intm =-1;
   ph = -1;
   data = 0;
+  path_key = -1;
+  lf_unit = -1;
+  pcie_payload = -1;
+  pcie_data_ret = 0;
 }  
 
 Flit * Flit::New() {
@@ -99,9 +103,13 @@ void Flit::Free() {
   _free.push(this);
 }
 
+// Deletes every flit ever allocated, so the free list must be emptied too:
+// it holds pointers into the same objects, and a later engine in the same
+// process would otherwise reuse freed memory.
 void Flit::FreeAll() {
   while(!_all.empty()) {
     delete _all.top();
     _all.pop();
   }
+  while(!_free.empty()) _free.pop();
 }

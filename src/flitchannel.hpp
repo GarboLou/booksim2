@@ -88,13 +88,18 @@ public:
   }
 
   // False while the wire is still serializing the previous flit. Callers must
-  // check this BEFORE dequeuing, because Channel<Flit>::Send() overwrites its
+  // check this before dequeuing, because Channel<Flit>::Send() overwrites its
   // single input slot unconditionally and would drop the flit on the floor.
   inline bool IsReady() const {
     return GetSimTime() >= _next_free_time;
   }
 
-  // Send flit 
+  // check_whole_tlp: every channel aborts if a flit of one packet crosses it
+  // while another packet's tail has not yet (a TLP split on the wire).
+  // Process-wide; the flow traffic manager sets it from its config.
+  static void SetCheckWholePackets(bool on) { _check_whole_packets = on; }
+
+  // Send flit
   virtual void Send(Flit * flit);
 
   virtual void ReadInputs();
@@ -117,6 +122,10 @@ private:
   // next becomes free.
   int _cycles_per_flit;
   int _next_free_time;
+
+  static bool _check_whole_packets;
+  int _open_pid;   // packet whose tail has not crossed yet, -1 if none
+  void _CheckWholePacket(Flit const * f);
 
   // Statistics for Activity Factors
   vector<int> _active;

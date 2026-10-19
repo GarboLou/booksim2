@@ -71,6 +71,11 @@ public:
     return _vc[vc]->FrontFlit( );
   }
   
+  inline bool FrontPacketBuffered( int vc ) const
+  {
+    return _vc[vc]->FrontPacketBuffered( );
+  }
+
   inline bool Empty( int vc ) const
   {
     return _vc[vc]->Empty( );

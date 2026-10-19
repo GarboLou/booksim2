@@ -1,8 +1,9 @@
 // $Id$
 
 /*
- Copyright (c) 2007-2015, Trustees of The Leland Stanford Junior University
- All rights reserved. Distributed under the BookSim BSD license; see LICENSE.md.
+ Copyright (c) 2026, Jiaqi Lou
+ All rights reserved. Distributed under the same BSD license as BookSim; see
+ LICENSE.md.
 */
 
 #include <cassert>
@@ -17,6 +18,7 @@
 #include "flowtrafficmanager.hpp"
 #include "globals.hpp"
 #include "network.hpp"
+#include "pcie_credits.hpp"
 
 namespace booksim {
 
@@ -62,10 +64,10 @@ void CheckInvariants(const BookSimConfig & config) {
   }
 
   const std::string bp = config.GetStr("buffer_policy");
-  if(bp != "private" && bp != "shared") {
-    std::cerr << "booksim::Engine: buffer_policy must be 'private' or 'shared' "
-              << "(got '" << bp << "'). The feedback policies carry "
-              << "absolute-time state that a clock jump would invalidate."
+  if(bp != "private" && bp != "shared" && bp != "limited") {
+    std::cerr << "booksim::Engine: buffer_policy must be 'private', 'shared' "
+              << "or 'limited' (got '" << bp << "'). The feedback policies "
+              << "carry absolute-time state that a clock jump would invalidate."
               << std::endl;
     exit(-1);
   }
@@ -106,6 +108,10 @@ Engine * Engine::Create(const std::string & config_file,
     os << overrides[i].first << " = " << overrides[i].second;
     p->config.ParseString(os.str());
   }
+
+  // pcie_credits = 1 derives the buffer storage keys from the credits; do it
+  // before anything reads them.
+  ApplyPcieCreditConfig(p->config);
 
   CheckInvariants(p->config);
 
@@ -166,6 +172,10 @@ void Engine::SetOnRecvComplete(FlowCb cb, void * ctx) {
 }
 
 void Engine::DumpStats(std::ostream & os) const   { p_->tm->WriteStats(os); }
-void Engine::DumpFlowCsv(std::ostream & os) const { p_->tm->DumpFlowCsv(os); }
+void Engine::SetFlowCsv(std::ostream * os) { p_->tm->SetFlowCsv(os); }
+void Engine::DumpMultipathStats(std::ostream & os) const { p_->tm->DumpMultipathStats(os); }
+void Engine::DumpPacketStats(std::ostream & os) const { p_->tm->DumpPacketStats(os); }
+bool Engine::PcieCreditsEnabled() const { return p_->tm->PcieCreditsEnabled(); }
+bool Engine::PcieCreditsIdle() const { return p_->tm->PcieCreditsIdle(); }
 
 } // namespace booksim

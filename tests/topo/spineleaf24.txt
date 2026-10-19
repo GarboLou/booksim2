@@ -1,0 +1,19 @@
+# Test fixture: the switch graph has cycles, but no route passes through a
+# switch on its way around one, so pinned multipath needs no restriction.
+router 2 domain 0 node 0 port_type downstream domain 0 lat 1
+router 2 domain 0 node 1 port_type downstream domain 0 lat 1
+router 3 domain 0 node 2 port_type downstream domain 0 lat 1
+router 3 domain 0 node 3 port_type downstream domain 0 lat 1
+router 4 domain 0 node 4 port_type downstream domain 0 lat 1
+router 4 domain 0 node 5 port_type downstream domain 0 lat 1
+router 5 domain 0 node 6 port_type downstream domain 0 lat 1
+router 5 domain 0 node 7 port_type downstream domain 0 lat 1
+router 0 router 2 port_type generic link_type transparent lat 2
+router 0 router 3 port_type generic link_type transparent lat 2
+router 0 router 4 port_type generic link_type transparent lat 2
+router 0 router 5 port_type generic link_type transparent lat 2
+router 1 router 2 port_type generic link_type transparent lat 2
+router 1 router 3 port_type generic link_type transparent lat 2
+router 1 router 4 port_type generic link_type transparent lat 2
+router 1 router 5 port_type generic link_type transparent lat 2
+router 2 node 8 lat 1 gen 5 width 16

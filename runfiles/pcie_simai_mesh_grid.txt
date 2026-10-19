@@ -1,0 +1,39 @@
+# Mesh-Grid PCIe Topology: 4 switches + 8 GPUs
+#
+# Layout (2x2 switch mesh with 2 GPUs per switch):
+#
+#   [SW0]---[SW1]
+#     |       |
+#   [SW2]---[SW3]
+#
+#   SW0: GPUs 0,1
+#   SW1: GPUs 2,3
+#   SW2: GPUs 4,5
+#   SW3: GPUs 6,7
+#
+# All links are transparent - each switch can reach every other via 1 or 2 hops
+
+# Switches with 2 GPUs each
+router 0 domain 0 node 0 port_type downstream domain 0 lat 1
+router 0 domain 0 node 1 port_type downstream domain 0 lat 1
+
+router 1 domain 0 node 2 port_type downstream domain 0 lat 1
+router 1 domain 0 node 3 port_type downstream domain 0 lat 1
+
+router 2 domain 0 node 4 port_type downstream domain 0 lat 1
+router 2 domain 0 node 5 port_type downstream domain 0 lat 1
+
+router 3 domain 0 node 6 port_type downstream domain 0 lat 1
+router 3 domain 0 node 7 port_type downstream domain 0 lat 1
+
+# Mesh inter-switch links (horizontal)
+router 0 router 1 port_type generic link_type transparent lat 2
+router 2 router 3 port_type generic link_type transparent lat 2
+
+# Mesh inter-switch links (vertical)
+router 0 router 2 port_type generic link_type transparent lat 2
+router 1 router 3 port_type generic link_type transparent lat 2
+
+# Node 8: inert NVSwitch placeholder required by SimCCL.
+# See pcie_simai_flat.txt for why it exists.
+router 0 node 8 lat 1 gen 5 width 16

@@ -123,7 +123,92 @@ BookSimConfig::BookSimConfig( )
   // Depth of the per-source injection queue, in packets. Bounds memory so a
   // multi-gigabyte flow is packetized on demand instead of all at once.
   _int_map["max_queued_packets"] = 8;
+  // Order in which a source puts its active flows' TLPs on its link. tlp: one
+  // TLP from each active flow in turn, as a GPU's concurrent NCCL channels do.
+  // flow: one flow at a time, in issue order.
+  AddStrField("source_interleave", "tlp");
   _float_map["ns_per_cycle"] = 1.0;
+  // Routing-deadlock avoidance for PCINet topologies with cycles (rings,
+  // meshes, redundant NTB bridges). auto: split the VCs into distance classes
+  // only when the routing function's channel dependency graph is cyclic;
+  // vc_classes: always split; none: never (stock BookSim, which can
+  // deadlock on such topologies). See PCINet::setupDeadlockAvoidance.
+  AddStrField("pcinet_deadlock_avoidance", "auto");
+  // Flow mode aborts once no flit has been delivered for this many cycles
+  // while flits are outstanding, instead of spinning forever on a deadlocked
+  // network. 0 disables the check.
+  _int_map["deadlock_abort_cycles"] = 1000000;
+  // Sender-pinned multipath (routing_function = pinned): the source picks the
+  // route, and every TLP of a unit follows it. PCINet enumerates up to max_paths_per_pair shortest paths per
+  // router pair. The flow traffic manager picks one per unit: a DMA request
+  // of dma_request_bytes (request), a whole flow (flow), or a TLP (packet;
+  // idealized, reorders posted writes). round_robin rotates per (source,
+  // destination); hash picks from the flow id and unit index; weighted is a
+  // smooth weighted round robin, each path weighted by its slowest
+  // router-to-router link.
+  _int_map["max_paths_per_pair"] = 64;
+  AddStrField("multipath_granularity", "request");
+  _int_map["dma_request_bytes"] = 4096;
+  AddStrField("multipath_select", "round_robin");
+  // Which paths a pair in two different domains (sockets) gets. shortest:
+  // the shortest paths, as for any pair. per_bridge (needs routing_function
+  // = pinned): the shortest route through each bridge between the domains --
+  // UPI between root complexes or an NTB between switches -- crossing exactly
+  // once; a pair inside one domain keeps to that domain. Domains come from
+  // the topology file's `router <id> domain <d>` lines.
+  AddStrField("pcinet_cross_domain_paths", "shortest");
+  // Which of several equal-length next hops routing_function = min takes.
+  // port: the lowest port (lowest neighbor router id). cross_first: toward a
+  // node in another domain, a next hop already in that domain first, then
+  // port order -- each switch crosses sockets at the earliest hop.
+  AddStrField("pcinet_min_tiebreak", "port");
+  // pcinet_deadlock_avoidance = loopfree only: every this many cycles, check
+  // that the registered pass-through graph is still acyclic (debug; 0 = off).
+  _int_map["loopfree_check_interval"] = 0;
+  // Order in which sources retry a refused admission each cycle. rotate:
+  // every source in turn, starting point rotating per cycle.
+  // oldest_first: units already waiting retry first, longest wait first, so a
+  // source that just released a pass-through cannot immediately re-take it.
+  AddStrField("loopfree_retry_order", "rotate");
+
+  // PCIe VC0 switch model: posted (P), non-posted (NP) and completion (Cpl)
+  // TLPs on the one virtual channel real PCIe fabrics use, each type with its
+  // own internal queues and header/data credits.
+  // Transaction type of flows injected without one (SimAI's are untagged):
+  // none: any VC, no type (stock BookSim); P / NP / Cpl assigns that type's VC
+  // range and credit pools.
+  AddStrField("pcie_default_class", "none");
+  // NOQ: VCs reserved per egress of the next switch. 0 divides each type's
+  // range evenly over the next switch's ports (stock BookSim); 1 gives exactly
+  // one internal queue per (type, egress), leaving spare VCs unused.
+  _int_map["noq_vcs_per_output"] = 0;
+  // Fixed switch delay added to every data channel into a switch (from a GPU
+  // or another switch), but not to its credit channel, so it sits in the
+  // upstream credit loop once. Cycles.
+  _int_map["pcinet_switch_latency"] = 0;
+  // Whole-TLP admission against PCIe header and data credits, per link
+  // direction and type (see pcie_credits.hpp). 0 = infinite for each value.
+  // Data in bytes (multiple of 16). All TODO calibrate.
+  _int_map["pcie_credits"]    = 0;
+  _int_map["pcie_ph"]         = 0;
+  _int_map["pcie_pd_bytes"]   = 0;
+  _int_map["pcie_nph"]        = 0;
+  _int_map["pcie_npd_bytes"]  = 0;
+  _int_map["pcie_cplh"]       = 0;
+  _int_map["pcie_cpld_bytes"] = 0;
+  // Debug: abort if TLPs of one (source, destination, path) retire out of
+  // order. Meaningful only where the model promises per-path order (one VC
+  // per (type, egress) under NOQ).
+  _int_map["check_path_order"] = 0;
+  // Every link sends each TLP whole, as PCIe does: a packet keeps its switch
+  // connection from head to tail, cut-through when the input link is at least
+  // as fast as the output, store-and-forward otherwise. Needs pcie_credits = 1.
+  // Stock BookSim (0) lets switches alternate flits of different packets on a
+  // link; stock hold_switch_for_packet does not prevent that either.
+  _int_map["whole_tlp"] = 0;
+  // Debug: abort if any link carries flits of two packets alternately, i.e.
+  // a TLP split on the wire.
+  _int_map["check_whole_tlp"] = 0;
 
   _int_map["private_bufs"] = -1;
   _int_map["private_buf_size"] = 1;

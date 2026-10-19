@@ -80,6 +80,22 @@ public:
   // Fields for arbitrary data
   void* data ;
 
+  // Index of the end-to-end path the sender pinned this packet to, taken
+  // modulo the number of paths for its (source, destination). -1 == not
+  // pinned; only the pinned routing function reads it.
+  int path_key;
+
+  // Loop-free admission unit this packet belongs to (FlowTrafficManager),
+  // -1 if none. Its pass-throughs stay registered until its last tail retires.
+  int lf_unit;
+
+  // PCIe credit model (pcie_credits = 1). The packet's payload in bytes, on
+  // every flit (-1: no PCIe metadata), and the data credits this flit returns
+  // when it leaves an input queue (pcie_credits.hpp: PcieDataReturns). A head
+  // reserves one header credit and PcieDataUnits(pcie_payload) data credits.
+  int pcie_payload;
+  int pcie_data_ret;
+
   // Lookahead route info
   OutputSet la_route_set;
 

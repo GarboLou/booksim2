@@ -48,10 +48,12 @@ void PacketReplyInfo::Free()
   _free.push(this);
 }
 
+// See Flit::FreeAll: the free list points into the deleted objects.
 void PacketReplyInfo::FreeAll()
 {
   while(!_all.empty()) {
     delete _all.top();
     _all.pop();
   }
+  while(!_free.empty()) _free.pop();
 }

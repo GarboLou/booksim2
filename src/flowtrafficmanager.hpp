@@ -2,6 +2,7 @@
 
 /*
  Copyright (c) 2007-2015, Trustees of The Leland Stanford Junior University
+ Copyright (c) 2026, Jiaqi Lou
  All rights reserved.
 
  Redistribution and use in source and binary forms, with or without
@@ -33,6 +34,9 @@
 #include <vector>
 
 #include "trafficmanager.hpp"
+#include "turn_graph.hpp"
+
+class PCINet;
 
 // An externally driven TrafficManager.
 //
@@ -77,7 +81,7 @@ public:
 
   // Queue a transfer. Returns immediately; the flow is packetized on demand as
   // the source's injection queue drains. `pcie_class` is 0 (unset -- the full,
-  // undivided VC pool, matching pre-existing behavior), 1 (Posted), 2
+  // undivided VC pool, as stock BookSim), 1 (Posted), 2
   // (Non-Posted), or 3 (Completion); see _GenerateFlowPacket for how this maps
   // onto Flit::FlitType and thus which VC-range/credit pool a flow's flits use.
   FlowId InjectFlow( int src, int dst, unsigned long long bytes, int cls,
@@ -97,8 +101,25 @@ public:
     _on_recv = cb; _on_recv_ctx = ctx;
   }
 
-  // flow,src,dst,bytes,packets,t_inject,t_sent,t_done,mean_hops,trace_id
-  void DumpFlowCsv( ostream & os ) const;
+  // Stream the per-flow CSV: the header now, then one row per flow as it
+  // completes, in completion order:
+  //   flow,src,dst,bytes,packets,t_inject,t_sent,t_done,mean_hops,trace_id
+  //   (+ paths_used under routing_function = pinned)
+  // Call before injecting flows. A completed flow's record is freed as soon
+  // as its row is written, or at once with no stream set, so memory does not
+  // grow with the number of completed flows.
+  void SetFlowCsv( ostream * os );
+
+  // Multipath settings and, under loopfree, the admission statistics.
+  void DumpMultipathStats( ostream & os ) const;
+
+  // Per-TLP latency and switch-count statistics over every packet retired.
+  void DumpPacketStats( ostream & os ) const;
+
+  // pcie_credits = 1: have all header and data credits come back, at every
+  // source and switch output? Meaningful once IsIdle().
+  bool PcieCreditsIdle( ) const;
+  bool PcieCreditsEnabled( ) const { return _pcie_credits; }
 
 protected:
 
@@ -121,6 +142,13 @@ protected:
     unsigned long long t_sent;          // last flit left the source
     unsigned long long t_done;          // last tail flit retired
     unsigned long long hops_total;      // summed over packets, for the mean
+
+    // Pinned multipath (routing_function = pinned).
+    int                cur_path_key;    // key of the unit being packetized
+    unsigned long long units_started;   // requests (or packets) begun so far
+    unsigned long long paths_used;      // bitmask over path indices 0..63
+    int                lf_unit;         // loop-free unit being generated, -1 if none
+    long long          lf_wait_since;   // cycle admission was first refused, -1 if not waiting
   };
 
   // Never fire a user callback from inside _RetireFlit: it runs mid-cycle,
@@ -139,7 +167,14 @@ protected:
 private:
 
   void _ServiceFlowQueues( );
-  void _GenerateFlowPacket( FlowRecord * fr, int size_flits );
+  void _ServiceSource( int n, int c );
+  // Earliest refused-admission cycle among (n, c)'s pending flows, -1 if none.
+  long long _OldestWait( int n, int c ) const;
+  bool _UnitStartsHere( const FlowRecord * fr ) const;
+  // false: loop-free admission refused every path; retry next cycle.
+  bool _StartUnit( FlowRecord * fr );
+  void _LfCheck( ) const;
+  void _GenerateFlowPacket( FlowRecord * fr, int size_flits, int payload );
   void _PopShadowQueues( );
   void _DrainCompletions( );
   FlowRecord * _Lookup( FlowId id );
@@ -154,6 +189,12 @@ private:
   // Flows waiting to be packetized, per (source, class), in issue order.
   vector<vector<deque<FlowRecord *> > > _pending_flows;
 
+  // source_interleave = tlp: a source takes one TLP from each of its pending
+  // flows in turn (as a GPU's concurrent NCCL channels do), starting at
+  // _rr_next[n][c]. flow: only the front flow, until it is fully packetized.
+  bool _interleave_tlp;
+  vector<vector<size_t> > _rr_next;
+
   // One entry per flit currently sitting in _partial_packets[src][cl], holding
   // the flow that flit belongs to. _Step() pops at most one flit per (src,cl)
   // per cycle from the front, so comparing sizes after the step tells us
@@ -162,7 +203,9 @@ private:
   vector<vector<deque<FlowId> > > _shadow_queues;
 
   map<FlowId, FlowRecord *> _flows;
-  vector<FlowRecord *>      _retired_flows;   // kept for DumpFlowCsv
+  ostream *                 _flow_csv;          // SetFlowCsv, NULL = none
+  unsigned long long        _units_retired;     // units_started of completed flows
+  void _WriteFlowCsvRow( ostream & os, const FlowRecord * fr ) const;
 
   vector<FlowId> _completed_this_cycle;
 
@@ -187,9 +230,71 @@ private:
   // P/NP/Cpl lazy validation state -- see _CheckPcieClassVcRange.
   string _buffer_policy;
   bool   _pcie_class_checked[4];
+  string _pools_vs_types;        // CheckPoolsMatchTypes for shared policies
+  int    _pcie_default_class;    // class given to untagged flows, 0 = none
+  bool   _pcie_credits;          // pcie_credits = 1: packets carry PCIe metadata
+
+  // check_path_order: last packet id retired per (src, dst, path key).
+  bool _check_path_order;
+  map<pair<pair<int, int>, int>, int> _last_pid_on_path;
+
+  // Deadlock watchdog -- see Step(). Counts consecutive cycles with flits
+  // outstanding and none delivered.
+  int  _deadlock_abort_cycles;   // 0 == disabled
+  int  _stall_cycles;
+  bool _retired_this_cycle;
+
+  // Pinned multipath (routing_function = pinned): the source picks one of
+  // PCINet's paths per unit (TLP, DMA request or flow).
+  enum Granularity { kGranPacket, kGranRequest, kGranFlow };
+  PCINet *    _pcinet;            // NULL unless topology = pcinet
+  bool        _pinned;            // routing_function = pinned
+  Granularity _granularity;
+  int         _packets_per_request;
+  enum Select { kSelRoundRobin, kSelHash, kSelWeighted };
+  Select      _select;            // multipath_select
+  // [src node][dst node] round-robin counters.
+  vector<vector<unsigned long long> > _next_path_key;
+  // multipath_select = weighted: smooth weighted round robin state per
+  // (src node, dst node), one current weight per path.
+  struct Swrr { vector<long long> w, cw; };   // weights, current weights
+  map<pair<int, int>, Swrr> _swrr;
+  vector<unsigned long long> _units_by_key;   // units started, by path key
+  Swrr & _SwrrState( int src, int dst, int npaths );
+  int  _WeightedPick( int src, int dst, int npaths );
+  void _WeightedCommit( int src, int dst, int npaths, int key );
+
+  // Loop-free path selection (pcinet_deadlock_avoidance = loopfree): admit a
+  // path only if it keeps the in-flight turn graph acyclic. A unit's pass-throughs are registered before its first
+  // packet is queued and released exactly once, when it is fully generated
+  // and its last outstanding tail has retired (LoopFreeUnits).
+  bool _loopfree;
+  int  _lf_check_interval;          // debug full check every N cycles, 0 = off
+  bool _lf_oldest_first;            // loopfree_retry_order = oldest_first
+  LoopFreeUnits _lf;                // one turn graph per credit pool
+  int _lf_pool_of_class[4];         // pcie_class -> pool
+  unsigned long long _lf_admitted;      // units with at least one pass-through
+  unsigned long long _lf_waited_units;
+  unsigned long long _lf_wait_cycles;
+  unsigned long long _lf_max_wait;
+  unsigned long long _lf_alt_path;      // units that took a non-first-choice path
+
+  // Per-TLP statistics, kept as histograms so memory does not grow with run
+  // length. Network latency runs from the head's injection to the tail's
+  // ejection; total latency from packet creation (queued at the source).
+  map<int, int> _head_itime;                        // pid -> head injection cycle
+  map<int, unsigned long long> _tlp_lat_net;        // cycles -> packets
+  map<int, unsigned long long> _tlp_lat_total;
+  unsigned long long _tlp_count;
+  unsigned long long _tlp_switches;                 // sum of routers traversed
 
   FlowCallback _on_send;  void * _on_send_ctx;
   FlowCallback _on_recv;  void * _on_recv_ctx;
 };
+
+// Exact positive integer weights inversely proportional to cycles per flit
+// (multipath_select = weighted). False if a cpf is not positive or the
+// weights would exceed 2^40.
+bool SwrrWeights( const vector<int> & cpf, vector<long long> & w );
 
 #endif

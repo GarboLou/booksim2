@@ -127,6 +127,15 @@ public:
     return (int)_buffer.size();
   }
 
+  // Has the front packet's tail arrived, i.e. is the whole packet buffered?
+  inline bool FrontPacketBuffered() const
+  {
+    for(deque<Flit *>::const_iterator i = _buffer.begin(); i != _buffer.end(); ++i) {
+      if((*i)->tail) return true;
+    }
+    return false;
+  }
+
   // ==== Debug functions ====
 
   void SetWatch( bool watch = true );

@@ -106,6 +106,7 @@ protected:
   tRoutingFunction _rf;
   bool _lookahead_routing;
   bool _noq;
+  int  _noq_vcs_per_output;
 
   // ============ Injection queues ============ 
 
@@ -119,6 +120,10 @@ protected:
   bool _empty_network;
 
   bool _hold_switch_for_packet;
+
+  // whole_tlp: once a source starts a TLP on its link, the link carries only
+  // that TLP until its tail, whatever the class or priority of other packets.
+  bool _whole_tlp;
 
   // ============ physical sub-networks ==========
 

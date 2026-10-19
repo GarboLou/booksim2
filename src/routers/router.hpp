@@ -163,6 +163,10 @@ public:
   virtual vector<int> FreeCredits() const = 0;
   virtual vector<int> MaxCredits() const = 0;
 
+  // PCIe protocol credits (pcie_credits = 1): has every output's receiver
+  // got all its header and data credits back?
+  virtual bool PcieCreditsIdle() const { return true; }
+
 #ifdef TRACK_STALLS
   inline int GetBufferBusyStalls(int c) const {
     assert((c >= 0) && (c < _classes));

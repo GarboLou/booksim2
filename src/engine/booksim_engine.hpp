@@ -1,8 +1,9 @@
 // $Id$
 
 /*
- Copyright (c) 2007-2015, Trustees of The Leland Stanford Junior University
- All rights reserved. Distributed under the BookSim BSD license; see LICENSE.md.
+ Copyright (c) 2026, Jiaqi Lou
+ All rights reserved. Distributed under the same BSD license as BookSim; see
+ LICENSE.md.
 */
 
 #ifndef _BOOKSIM_ENGINE_HPP_
@@ -36,10 +37,9 @@ struct FlowDesc {
   uint64_t bytes;
   int      cls;    // traffic class; 0 unless the config defines more
   // PCIe ordering class, for the VC-range/credit-pool separation that keeps
-  // a flood of one category from starving another (see PCIE_MODEL_LIMITATIONS.md
-  // for what this does and does not model -- in particular, it separates credit
-  // pools but does NOT enforce PCIe's transaction ordering rules):
-  //   0 = unset (gets the full, undivided VC pool -- today's behavior)
+  // a flood of one category from starving another. It separates credit pools
+  // but does not enforce PCIe's transaction ordering rules.
+  //   0 = unset (gets the full, undivided VC pool, as stock BookSim)
   //   1 = Posted     (maps to Flit::WRITE_REQUEST)
   //   2 = Non-Posted (maps to Flit::READ_REQUEST)
   //   3 = Completion (maps to Flit::READ_REPLY)
@@ -79,7 +79,18 @@ public:
   uint64_t FlowsOutstanding() const;
 
   void     DumpStats(std::ostream & os) const;
-  void     DumpFlowCsv(std::ostream & os) const;
+  // Per-flow CSV, streamed: header now, one row per flow as it completes.
+  // Call before injecting flows; os must outlive the Engine or a later
+  // SetFlowCsv(NULL). Completed flows are not retained, CSV or not.
+  void     SetFlowCsv(std::ostream * os);
+  // Pinned-multipath unit counts and loop-free admission statistics.
+  void     DumpMultipathStats(std::ostream & os) const;
+  // Per-TLP latency (network and total) and switches-traversed statistics.
+  void     DumpPacketStats(std::ostream & os) const;
+
+  // pcie_credits = 1: once idle, every header and data credit must be back.
+  bool     PcieCreditsEnabled() const;
+  bool     PcieCreditsIdle() const;
 
 private:
   struct Impl;

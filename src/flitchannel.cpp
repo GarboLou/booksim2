@@ -36,6 +36,7 @@
 
 #include <iostream>
 #include <iomanip>
+#include <sstream>
 
 #include "router.hpp"
 #include "globals.hpp"
@@ -48,8 +49,21 @@
 FlitChannel::FlitChannel(Module * parent, string const & name, int classes)
 : Channel<Flit>(parent, name), _routerSource(NULL), _routerSourcePort(-1), 
   _routerSink(NULL), _routerSinkPort(-1), _cycles_per_flit(1), _next_free_time(0),
-  _idle(0) {
+  _open_pid(-1), _idle(0) {
   _active.resize(classes, 0);
+}
+
+bool FlitChannel::_check_whole_packets = false;
+
+void FlitChannel::_CheckWholePacket(Flit const * f) {
+  if(f->head ? (_open_pid >= 0) : (f->pid != _open_pid)) {
+    ostringstream err;
+    err << "check_whole_tlp: " << FullName() << " carries flit " << f->id
+        << " of packet " << f->pid << " while packet " << _open_pid
+        << " is unfinished (a TLP split on the wire; set whole_tlp = 1)";
+    Error(err.str());
+  }
+  _open_pid = f->tail ? -1 : f->pid;
 }
 
 void FlitChannel::SetSource(Router const * const router, int port) {
@@ -68,6 +82,7 @@ void FlitChannel::Send(Flit * f) {
     // channel would silently overwrite the flit already in the input slot, so
     // trap it here rather than lose traffic.
     assert(IsReady());
+    if(_check_whole_packets) _CheckWholePacket(f);
     _next_free_time = GetSimTime() + _cycles_per_flit;
     ++_active[f->cl];
   } else {

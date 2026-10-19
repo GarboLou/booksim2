@@ -4,3 +4,8 @@ y.tab.c
 y.tab.h
 *.o
 *.d
+/tests/*
+!/tests/*.cpp
+!/tests/*.hpp
+libbooksim.a
+/tools/booksim_flowtest

@@ -45,4 +45,12 @@ extern int gWriteReqBeginVC, gWriteReqEndVC;
 extern int gReadReplyBeginVC, gReadReplyEndVC;
 extern int gWriteReplyBeginVC, gWriteReplyEndVC;
 
+// Next-hop output queueing (noq = 1): the part of [range_start, range_end]
+// reserved for packets that will leave the next router through next_output
+// of its num_outputs ports. per_output == 0 divides the range evenly (stock
+// BookSim); per_output > 0 reserves exactly that many VCs per output and
+// leaves the rest unused. Returns false if the range is too small.
+bool NoqVcSlice( int range_start, int range_end, int next_output, int num_outputs,
+                 int per_output, int & vc_start, int & vc_end );
+
 #endif

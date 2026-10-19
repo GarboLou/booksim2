@@ -35,6 +35,7 @@
 #include "flit.hpp"
 #include "credit.hpp"
 #include "config_utils.hpp"
+#include "pcie_credits.hpp"
 
 class BufferState : public Module {
   
@@ -169,6 +170,25 @@ class BufferState : public Module {
   vector<int> _last_id;
   vector<int> _last_pid;
 
+  // PCIe protocol credits of the receiver (pcie_credits = 1), per type:
+  // reserved for a whole TLP when its head is sent, released by the credit
+  // records the receiver returns. Kept apart from the flit-slot accounting.
+  PcieCreditLimits _pcie;
+  int _pcie_hdr_used[PCIE_NUM_TYPES];
+  int _pcie_data_used[PCIE_NUM_TYPES];
+
+  // whole_tlp (with pcie_credits): a head needs flit slots for its whole TLP,
+  // like PCIe, where a TLP goes on the link only once the receiver has room
+  // for all of it. The link stays the TLP's until its tail, so nothing else
+  // takes those slots and the TLP never stalls half-sent.
+  bool _whole_tlp;
+  int  _tlp_overhead;
+  int  _flit_bytes;
+  inline int TlpFlits( Flit const * f ) const {
+    const int n = (f->pcie_payload + _tlp_overhead + _flit_bytes - 1) / _flit_bytes;
+    return n < 1 ? 1 : n;
+  }
+
 #ifdef TRACK_BUFFERS
   int _classes;
   vector<queue<int> > _outstanding_classes;
@@ -198,6 +218,18 @@ public:
   inline bool IsFullFor( int vc = 0 ) const {
     return _buffer_policy->IsFullFor(vc);
   }
+  // Can flit f be sent on vc now? Adds, for a head under pcie_credits, the
+  // whole-TLP check: one header credit and all its data credits. Body flits
+  // need only a flit slot; their TLP's credits were reserved with the head.
+  inline bool IsFullFor( int vc, Flit const * f ) const {
+    return _buffer_policy->IsFullFor(vc) ||
+           (_pcie.enabled && f->head && !CanAdmitTLP(f)) ||
+           (_whole_tlp && f->head && _buffer_policy->AvailableFor(vc) < TlpFlits(f));
+  }
+  bool CanAdmitTLP( Flit const * f ) const;
+  int PcieHeadersUsed( int type ) const { return _pcie_hdr_used[type]; }
+  int PcieDataUsed( int type ) const { return _pcie_data_used[type]; }
+  bool PcieCreditsIdle( ) const;
   inline int AvailableFor( int vc = 0 ) const {
     return _buffer_policy->AvailableFor(vc);
   }
